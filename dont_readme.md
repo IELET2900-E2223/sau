@@ -1,1 +1,0 @@
-"Dette er unyttig tekst uten mål og mening. Beklager for tiden jeg brukte av livet ditt."
