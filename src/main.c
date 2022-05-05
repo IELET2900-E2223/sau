@@ -21,14 +21,10 @@
 // Initiates log module. you can then chose which type of log event you want to see (warning, error, info)
 LOG_MODULE_REGISTER(SAU, 3);
 
-// creates the gnss_work_q variable of k_work_q structure
+
+// AGPS related
+#if !defined(CONFIG_SAU_ASSISTANCE_NONE)
 static struct k_work_q gnss_work_q;
-
-// Cloud related variables
-static struct cloud_backend *cloud_backend;
-static struct k_work_delayable cloud_update_work;
-static struct k_work_delayable connect_work;
-
 // Allocates stack and priority
 #define GNSS_WORKQ_THREAD_STACK_SIZE 2304
 #define GNSS_WORKQ_THREAD_PRIORITY 5
@@ -39,6 +35,48 @@ K_THREAD_STACK_DEFINE(gnss_workq_stack_area, GNSS_WORKQ_THREAD_STACK_SIZE);
 static struct nrf_modem_gnss_agps_data_frame last_agps; // For agps data
 static struct k_work agps_data_get_work;				// function fot getting data
 static volatile bool requesting_assistance;
+
+/* requests agps data if needed*/
+static void agps_data_get_work_fn(struct k_work *item)
+{
+	ARG_UNUSED(item);
+
+	int err;
+
+	requesting_assistance = true;
+
+	printk("Assistance data needed, ephe 0x%08x, alm 0x%08x, flags 0x%02x",
+		   last_agps.sv_mask_ephe,
+		   last_agps.sv_mask_alm,
+		   last_agps.data_flags);
+
+// Following is only if LTE is disconnected between communication
+#if defined(CONFIG_SAU_LTE_ON_DEMAND)
+	lte_connect();
+#endif /* CONFIG_SAU_LTE_ON_DEMAND */
+
+	err = assistance_request(&last_agps);
+	if (err)
+	{
+		printk("Failed to request assistance data");
+	}
+
+// Following is only if LTE is disconnected between communication (Its not in our application. LTE PSM FTW.)
+#if defined(CONFIG_SAU_LTE_ON_DEMAND)
+	lte_disconnect();
+#endif /* CONFIG_SAU_LTE_ON_DEMAND */
+
+	requesting_assistance = false;
+}
+
+#endif //!defined(CONFIG_SAU_ASSISTANCE_NONE)
+
+
+// Cloud related variables
+static struct cloud_backend *cloud_backend;
+static struct k_work_delayable cloud_update_work;
+static struct k_work_delayable connect_work;
+
 
 // Unused, but really cool. Might use in a future version
 // static const char update_indicator[] = {'\\', '|', '/', '-'};
@@ -238,7 +276,7 @@ static void date_time_evt_handler(const struct date_time_evt *evt) // How does t
 static void gnss_event_handler(int event)
 {
 	int retval;
-	struct nrf_modem_gnss_nmea_data_frame *nmea_data;
+	// struct nrf_modem_gnss_nmea_data_frame *nmea_data; //We don't really care about nmea data, only pvt. So the modem handles it all.
 
 	switch (event)
 	{
@@ -364,38 +402,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		break;
 	}
 }
-/* requests agps data if needed*/
-static void agps_data_get_work_fn(struct k_work *item)
-{
-	ARG_UNUSED(item);
 
-	int err;
-
-	requesting_assistance = true;
-
-	printk("Assistance data needed, ephe 0x%08x, alm 0x%08x, flags 0x%02x",
-		   last_agps.sv_mask_ephe,
-		   last_agps.sv_mask_alm,
-		   last_agps.data_flags);
-
-// Following is only if LTE is disconnected between communication
-#if defined(CONFIG_SAU_LTE_ON_DEMAND)
-	lte_connect();
-#endif /* CONFIG_SAU_LTE_ON_DEMAND */
-
-	err = assistance_request(&last_agps);
-	if (err)
-	{
-		printk("Failed to request assistance data");
-	}
-
-// Following is only if LTE is disconnected between communication (Its not in our application. LTE PSM FTW.)
-#if defined(CONFIG_SAU_LTE_ON_DEMAND)
-	lte_disconnect();
-#endif /* CONFIG_SAU_LTE_ON_DEMAND */
-
-	requesting_assistance = false;
-}
 
 /* Connects to LTE, sets mode, initiates date/time*/
 static int modem_init(void)
@@ -513,14 +520,12 @@ endif // CONFIG_SAU_ASSISTANCE_NONE
 	/* This use case flag should always be set. */
 	uint8_t use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START;
 
-	if (IS_ENABLED(CONFIG_SAU_MODE_PERIODIC) &&
-		!IS_ENABLED(CONFIG_SAU_ASSISTANCE_NONE))
+	if (!IS_ENABLED(CONFIG_SAU_ASSISTANCE_NONE))
 	{
-		/* Disable GNSS scheduled downloads when assistance is used. */ // What does this mean? Why wont we use
-		use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE;
+		use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE; //Not sure about this one..
 	}
 
-	if (IS_ENABLED(CONFIG_SAU_LOW_ACCURACY)) // We're not using this now/yet, but seems simple enough
+	if (IS_ENABLED(CONFIG_SAU_LOW_ACCURACY)) // Allows low accuracy fixes with only 3 satelites
 	{
 		use_case |= NRF_MODEM_GNSS_USE_CASE_LOW_ACCURACY;
 	}
