@@ -19,7 +19,7 @@
 #include "assistance.h"
 
 // Initiates log module. you can then chose which type of log event you want to see (warning, error, info)
-LOG_MODULE_REGISTER(SAU, 3);
+LOG_MODULE_REGISTER(SAU, CONFIG_SAU_LOG_LEVEL);
 
 
 // AGPS related
