@@ -21,7 +21,6 @@
 // Initiates log module. you can then chose which type of log event you want to see (warning, error, info)
 LOG_MODULE_REGISTER(SAU, CONFIG_SAU_LOG_LEVEL);
 
-
 // AGPS related
 #if !defined(CONFIG_SAU_ASSISTANCE_NONE)
 static struct k_work_q gnss_work_q;
@@ -69,14 +68,12 @@ static void agps_data_get_work_fn(struct k_work *item)
 	requesting_assistance = false;
 }
 
-#endif //!defined(CONFIG_SAU_ASSISTANCE_NONE)
-
+#endif //! defined(CONFIG_SAU_ASSISTANCE_NONE)
 
 // Cloud related variables
 static struct cloud_backend *cloud_backend;
 static struct k_work_delayable cloud_update_work;
 static struct k_work_delayable connect_work;
-
 
 // Unused, but really cool. Might use in a future version
 // static const char update_indicator[] = {'\\', '|', '/', '-'};
@@ -133,12 +130,13 @@ static void connect_work_fn(struct k_work *work)
 	{
 		printk("cloud_connect, error: %d", err);
 	}
+	/*
+		printk("Next connection retry in %d seconds",
+				CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS);
 
-	printk("Next connection retry in %d seconds",
-			CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS);
-
-	k_work_schedule(&connect_work,
-					K_SECONDS(CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS));
+		k_work_schedule(&connect_work,
+						K_SECONDS(CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS));
+						*/
 }
 
 static void cloud_update_work_fn(struct k_work *work)
@@ -150,8 +148,6 @@ static void cloud_update_work_fn(struct k_work *work)
 		printk("Not connected to cloud, abort cloud publication");
 		return;
 	}
-
-	printk("Publishing message: %s", log_strdup(CONFIG_CLOUD_MESSAGE));
 
 	struct cloud_msg msg = {
 		.qos = CLOUD_QOS_AT_MOST_ONCE,
@@ -177,12 +173,6 @@ static void cloud_update_work_fn(struct k_work *work)
 	{
 		printk("cloud_send failed, error: %d", err);
 	}
-	/*
-	#if defined(CONFIG_CLOUD_PUBLICATION_SEQUENTIAL)
-		k_work_schedule(&cloud_update_work,
-				K_SECONDS(CONFIG_CLOUD_MESSAGE_PUBLICATION_INTERVAL));
-	#endif
-	*/
 }
 
 // Cloud event handler
@@ -230,8 +220,8 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 
 		printk("CLOUD_EVT_DATA_RECEIVED");
 		printk("Data received from cloud: %.*s",
-				evt->data.msg.len,
-				log_strdup(evt->data.msg.buf));
+			   evt->data.msg.len,
+			   log_strdup(evt->data.msg.buf));
 		// Her må vi lagre dataen, og agere på den!
 		break;
 
@@ -355,12 +345,12 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		}
 
 		printk("Network registration status: %s",
-				evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming");
+			   evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming");
 		k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		printk("PSM parameter update: TAU: %d, Active time: %d",
-				evt->psm_cfg.tau, evt->psm_cfg.active_time);
+			   evt->psm_cfg.tau, evt->psm_cfg.active_time);
 		break;
 	case LTE_LC_EVT_EDRX_UPDATE:
 	{
@@ -378,31 +368,30 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	}
 	case LTE_LC_EVT_RRC_UPDATE:
 		printk("RRC mode: %s",
-				evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ? "Connected" : "Idle");
+			   evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ? "Connected" : "Idle");
 		break;
 	case LTE_LC_EVT_CELL_UPDATE:
 		printk("LTE cell changed: Cell ID: %d, Tracking area: %d",
-				evt->cell.id, evt->cell.tac);
+			   evt->cell.id, evt->cell.tac);
 		break;
 	case LTE_LC_EVT_LTE_MODE_UPDATE:
 		printk("Active LTE mode changed: %s",
-				evt->lte_mode == LTE_LC_LTE_MODE_NONE ? "None" : evt->lte_mode == LTE_LC_LTE_MODE_LTEM ? "LTE-M"
-															 : evt->lte_mode == LTE_LC_LTE_MODE_NBIOT  ? "NB-IoT"
-																									   : "Unknown");
+			   evt->lte_mode == LTE_LC_LTE_MODE_NONE ? "None" : evt->lte_mode == LTE_LC_LTE_MODE_LTEM ? "LTE-M"
+															: evt->lte_mode == LTE_LC_LTE_MODE_NBIOT  ? "NB-IoT"
+																									  : "Unknown");
 		break;
 	case LTE_LC_EVT_MODEM_EVENT:
 		printk("Modem domain event, type: %s",
-				evt->modem_evt == LTE_LC_MODEM_EVT_LIGHT_SEARCH_DONE ? "Light search done" : evt->modem_evt == LTE_LC_MODEM_EVT_SEARCH_DONE ? "Search done"
-																						 : evt->modem_evt == LTE_LC_MODEM_EVT_RESET_LOOP	? "Reset loop detected"
-																						 : evt->modem_evt == LTE_LC_MODEM_EVT_BATTERY_LOW	? "Low battery"
-																						 : evt->modem_evt == LTE_LC_MODEM_EVT_OVERHEATED	? "Modem is overheated"
-																																			: "Unknown");
+			   evt->modem_evt == LTE_LC_MODEM_EVT_LIGHT_SEARCH_DONE ? "Light search done" : evt->modem_evt == LTE_LC_MODEM_EVT_SEARCH_DONE ? "Search done"
+																						: evt->modem_evt == LTE_LC_MODEM_EVT_RESET_LOOP	   ? "Reset loop detected"
+																						: evt->modem_evt == LTE_LC_MODEM_EVT_BATTERY_LOW   ? "Low battery"
+																						: evt->modem_evt == LTE_LC_MODEM_EVT_OVERHEATED	   ? "Modem is overheated"
+																																		   : "Unknown");
 		break;
 	default:
 		break;
 	}
 }
-
 
 /* Connects to LTE, sets mode, initiates date/time*/
 static int modem_init(void)
@@ -486,15 +475,15 @@ static int sample_init(void)
 
 static int gnss_init_and_start(void)
 {
-/*#if defined(CONFIG_SAU_ASSISTANCE_NONE)
-	// Enable GNSS.
-	if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) // This activates GNSS without changing LTE.
-	{
-		printk("Failed to activate GNSS functional mode");
-		return -1;
-	}
-endif // CONFIG_SAU_ASSISTANCE_NONE 
-*/
+	/*#if defined(CONFIG_SAU_ASSISTANCE_NONE)
+		// Enable GNSS.
+		if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) // This activates GNSS without changing LTE.
+		{
+			printk("Failed to activate GNSS functional mode");
+			return -1;
+		}
+	endif // CONFIG_SAU_ASSISTANCE_NONE
+	*/
 	/* Configure GNSS. */
 	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0)
 	{
@@ -522,7 +511,7 @@ endif // CONFIG_SAU_ASSISTANCE_NONE
 
 	if (!IS_ENABLED(CONFIG_SAU_ASSISTANCE_NONE))
 	{
-		use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE; //Not sure about this one..
+		use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE; // Not sure about this one..
 	}
 
 	if (IS_ENABLED(CONFIG_SAU_LOW_ACCURACY)) // Allows low accuracy fixes with only 3 satelites
@@ -678,10 +667,17 @@ void checkForSem(void)
 			k_sem_take(events[2].sem, K_NO_WAIT) == 0)
 		{
 			printk("Fix available!");
-			print_fix_data(&last_pvt); // Prints the fix data
-			//cloud_send(cloud_backend, &last_pvt);
-			
-									   // Her skal vi sende data!
+			// print_fix_data(&last_pvt); // Prints the fix data
+
+			struct cloud_msg msg = {
+				.qos = CLOUD_QOS_AT_MOST_ONCE,
+				.buf = &last_pvt,
+				.len = strlen(&last_pvt),
+				.endpoint = CLOUD_EP_MSG};
+
+			cloud_send(cloud_backend, &msg);
+
+			// Her skal vi sende data!
 		}
 		events[0].state = K_POLL_STATE_NOT_READY;
 		events[1].state = K_POLL_STATE_NOT_READY;
@@ -720,9 +716,9 @@ void main(void)
 	if (err)
 	{
 		printk("Cloud backend could not be initialized, error: %d",
-				err);
+			   err);
 	}
-	work_init(); // Cloud related work fn 
+	work_init(); // Cloud related work fn
 
 	for (;;)
 	{

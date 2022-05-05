@@ -13,12 +13,12 @@
 
 #include "assistance.h"
 
-LOG_MODULE_DECLARE(gnss_sample, CONFIG_GNSS_SAMPLE_LOG_LEVEL);
+LOG_MODULE_DECLARE(SAU, CONFIG_SAU_LOG_LEVEL);
 
-#define SUPL_SERVER        CONFIG_GNSS_SAMPLE_SUPL_HOSTNAME
-#define SUPL_SERVER_PORT   CONFIG_GNSS_SAMPLE_SUPL_PORT
+#define SUPL_SERVER        CONFIG_SAU_SUPL_HOSTNAME
+#define SUPL_SERVER_PORT   CONFIG_SAU_SUPL_PORT
 
-BUILD_ASSERT(sizeof(CONFIG_GNSS_SAMPLE_SUPL_HOSTNAME) > 1, "Server hostname must be configured");
+BUILD_ASSERT(sizeof(CONFIG_SAU_SUPL_HOSTNAME) > 1, "Server hostname must be configured");
 
 static int supl_fd = -1;
 static volatile bool assistance_active;

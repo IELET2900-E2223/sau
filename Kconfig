@@ -101,10 +101,6 @@ config CLOUD_MESSAGE
 	string "Sets the custom message published periodically to cloud"
 	default "{\"state\":{\"reported\":{\"message\":\"Hello Internet of Things!\"}}}"
 
-config CLOUD_MESSAGE_PUBLICATION_INTERVAL
-	int "Sets how often the custom message should be published to cloud, in seconds"
-	default 10
-
 config CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS
 	int "Sets the number of seconds between each cloud connection retry"
 	default 30
