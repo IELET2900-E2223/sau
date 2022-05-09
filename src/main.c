@@ -15,6 +15,7 @@
 #include <net/cloud.h>
 #include <net/socket.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "assistance.h"
 
@@ -284,7 +285,7 @@ static void gnss_event_handler(int event)
 
 		if (retval == 0)
 		{
-			k_sem_give(&pvt_data_sem); // This flags K_POLL_STATE_SEM_AVAILABLE ?
+			k_sem_give(&pvt_data_sem); 
 		}
 		break;
 
@@ -622,7 +623,6 @@ void get_gnss_fix(void)
 		k_sem_give(&pvt_data_sem);
 		err = nrf_modem_gnss_stop(); // Stops the gnss modem after the fix is pulled from it
 	}
-	// k_sleep(6 * 3600 * 1000)
 }
 
 /* Prints satellite data; number of healthy satellites.*/
@@ -713,8 +713,9 @@ int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
 
 void checkForSem(void)
 {
-	k_poll(events, 2, K_FOREVER); //Only looking for the two first sems in events
+	k_poll(events, 2, K_FOREVER); // Only looking for the two first sems in events
 	// If there is new PVT data, regardless of its validity
+	/*
 	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
 		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
 	{
@@ -725,6 +726,7 @@ void checkForSem(void)
 
 		// If there is new, valid PVT data:
 	}
+	*/
 	if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
 		k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
 	{
@@ -732,13 +734,16 @@ void checkForSem(void)
 		print_fix_data(&last_pvt);																									   // Prints the fix data
 		if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
 		{
-			/*struct cloud_msg msg = {
-							.qos = CLOUD_QOS_AT_MOST_ONCE,
-							.buf = &last_pvt,
-							.len = strlen(&last_pvt),
-							.endpoint = CLOUD_EP_MSG};
-			*/
-			// cloud_send(cloud_backend, &msg);
+
+			char payloadString[128] = {0};
+			strcpy(payloadString, ("{\"payload\":{\"lat\":%.06f}{\"lon\":%.06f}}", &last_pvt.latitude, &last_pvt.longitude));
+
+			struct cloud_msg msg = {
+				.qos = CLOUD_QOS_AT_MOST_ONCE,
+				.buf = payloadString,
+				.len = strlen(payloadString)};
+
+			cloud_send(cloud_backend, &msg);
 			// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
 
 			printk("Her skal vi sende data!");
