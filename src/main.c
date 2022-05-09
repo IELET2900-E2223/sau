@@ -825,6 +825,10 @@ void main(void)
 	{
 		checkForSem(); // Polli'n'g function
 		//send_struct(package); // sender json til cloud
-		transmit_to_cloud("This in ground control to major Too..rje.");
+		if (cloud_connected) 
+		{
+			transmit_to_cloud("This in ground control to major Too..rje.");
+		}
+		
 	}
 }
