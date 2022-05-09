@@ -15,7 +15,7 @@
 #include <net/cloud.h>
 #include <net/socket.h>
 #include <stdio.h>
-#include "sau.h"
+#include <cJSON.h>
 #include "assistance.h"
 
 // Initiates log module. you can then chose which type of log event you want to see (warning, error, info)
@@ -702,6 +702,108 @@ int16_t changeIntervalAndRetryTime(int fix_interval, int fix_retry)
 	return 0;
 }
 
+/* Håvard's experimentelle lekestue */
+
+struct json {
+   double longitude;
+   double latitude;
+   float  altitude;
+   float  accuracy;
+   int    developer;
+};
+
+struct json package;
+
+void transmit_to_cloud(char* message) {
+
+	struct cloud_msg msg = {
+		.qos = CLOUD_QOS_AT_MOST_ONCE, //Bør evalueres
+		.buf = message,
+		.len = strlen(message)
+	};
+
+	
+	int err = cloud_send(cloud_backend, &msg);
+	if (err) {
+		LOG_ERR("cloud_send failed, error: %d", err);
+	}
+}
+
+/* work in progress
+
+void  pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data){
+	package.longitude = pvt_data->longitude;
+	package.latitude = pvt_data->latitude;
+	package.altitude = pvt_data->altitude;
+	package.accuracy = pvt_data->accuracy;
+}
+
+static void send_struct(struct json package)
+{
+	char* out;
+	char lon_buf[6];
+	char lat_buf[6];
+	char alt_buf[6];
+	char acc_buf[6];
+	char dev_buf[1];
+	double lon = package.longitude;
+	double lat = package.latitude;
+	float alt = package.altitude;
+	float acc = package.accuracy;
+	int dev = package.developer;
+
+	snprintf(lon_buf, sizeof(lon_buf), "%.6f", lon);
+	snprintf(lat_buf, sizeof(lat_buf), "%.6f", lat);
+	snprintf(alt_buf, sizeof(alt_buf), "%.6f", alt);
+	snprintf(acc_buf, sizeof(alt_buf), "%.6f", acc);
+	snprintf(dev_buf, sizeof(alt_buf), "%d"  , dev);
+
+	if (dev == 0) {
+		printk("Latitude : %s\n", lon_buf);
+		printk("Longitude: %s\n", lat_buf);
+		printk("Altitude : %s\n", alt_buf);
+		printk("DevMode  : %s\n", package.developer);
+	}
+
+	cJSON *root;
+
+	//create root node and array
+	root = cJSON_CreateObject();	
+
+	//add sensor data 
+	cJSON_AddItemToObject(root, "Latitude" , cJSON_CreateString(lon_buf));
+	cJSON_AddItemToObject(root, "Longitude", cJSON_CreateString(lat_buf));
+	cJSON_AddItemToObject(root, "Altitude" , cJSON_CreateString(alt_buf));
+	cJSON_AddItemToObject(root, "Accuracy" , cJSON_CreateString(acc_buf));
+	cJSON_AddItemToObject(root, "Developer", cJSON_CreateString(dev_buf));
+
+	// print everything
+	out = cJSON_Print(root);
+	if (out == NULL) {
+		printk("Failed print...\n");
+	}
+    printk("%s\n", out);
+
+	//CLOUD MAGIC
+
+	transmit_to_cloud(out); //sender JSON til cloud
+
+	// Publish with MQTT
+
+	//data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
+   			//out, strlen(out));
+
+	free(out);
+
+	// free all objects under root and root itself
+	cJSON_Delete(root);
+
+	return;
+}
+
+
+*/
+
 void main(void)
 {
 	modem_init();
@@ -721,6 +823,8 @@ void main(void)
 
 	for (;;)
 	{
-		checkForSem(); // Polling function
+		checkForSem(); // Polli'n'g function
+		//send_struct(package); // sender json til cloud
+		transmit_to_cloud("This in ground control to major Too..rje.");
 	}
 }
