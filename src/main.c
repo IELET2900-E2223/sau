@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "assistance.h"
 
 // Initiates log module. you can then chose which type of log event you want to see (warning, error, info)
@@ -85,7 +86,7 @@ static uint64_t fix_timestamp;
 
 bool cloud_connected; // Flags if we are connected to the cloud. Used for error handling.
 
-K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4);
+// K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4);
 
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(lte_ready, 0, 1);
@@ -95,12 +96,12 @@ static K_SEM_DEFINE(lte_connected, 0, 1);		// This flags a successful connection
 static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flags that we are connected to the cloud
 
 #define PVT_DATA_SEM 0
-#define NMEA_QUEUE_SEM 1
-#define PVT_FIX_SEM 2
-#define LTE_CONNECTED_SEM 3
-#define CLOUD_CONNECTED_SEM 4
+#define PVT_FIX_SEM 1
+#define LTE_CONNECTED_SEM 2
+#define CLOUD_CONNECTED_SEM 3
+//#define NMEA_QUEUE_SEM 4
 
-static struct k_poll_event events[5] = {
+static struct k_poll_event events[4] = {
 
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
@@ -111,13 +112,14 @@ static struct k_poll_event events[5] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&lte_connected, 0),
-
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&pvt_data_sem, 0),
+	/*
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&nmea_queue, 0),
+									*/
 };
 
 // To assert the build.
@@ -130,6 +132,7 @@ BUILD_ASSERT(IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_GPS) ||
 			 "CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS must be enabled\n");
 */
 // Cloud related
+
 static void connect_work_fn(struct k_work *work)
 {
 	int err;
@@ -285,7 +288,7 @@ static void gnss_event_handler(int event)
 
 		if (retval == 0)
 		{
-			k_sem_give(&pvt_data_sem); 
+			k_sem_give(&pvt_data_sem);
 		}
 		break;
 
@@ -711,6 +714,110 @@ int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
 /*This is for having default arguments in the changeIntervalAndRetryTime function*/
 #define changeIntervalAndRetryTime(...) var_changeIntervalAndRetryTime((changeIntervalAndRetryTime_args){__VA_ARGS__});
 
+
+struct json
+{
+	double longitude;
+	double latitude;
+	float altitude;
+	float accuracy;
+	int developer;
+};
+
+struct json package;
+
+void transmit_to_cloud(char *message)
+{
+
+	struct cloud_msg msg = {
+		.qos = CLOUD_QOS_AT_MOST_ONCE, // Bør evalueres
+		.buf = message,
+		.len = strlen(message)};
+
+	int err = cloud_send(cloud_backend, &msg);
+	if (err)
+	{
+		printk("cloud_send failed, error: %d", err);
+	}
+}
+
+// work in progress
+
+void pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
+{
+	package.longitude = pvt_data->longitude;
+	package.latitude = pvt_data->latitude;
+	package.altitude = pvt_data->altitude;
+	package.accuracy = pvt_data->accuracy;
+}
+
+static void send_struct(struct json package)
+{
+	char *out;
+	char lon_buf[128];
+	char lat_buf[128];
+	char alt_buf[128];
+	char acc_buf[128];
+	char dev_buf[128];
+	double lon = package.longitude;
+	double lat = package.latitude;
+	float alt = package.altitude;
+	float acc = package.accuracy;
+	int dev = package.developer;
+
+	snprintf(lon_buf, sizeof(lon_buf), "%.6f", lon);
+	snprintf(lat_buf, sizeof(lat_buf), "%.6f", lat);
+	snprintf(alt_buf, sizeof(alt_buf), "%.6f", alt);
+	snprintf(acc_buf, sizeof(alt_buf), "%.6f", acc);
+	snprintf(dev_buf, sizeof(alt_buf), "%d", dev);
+
+	if (dev == 0)
+	{
+		printk("Latitude : %s\n", lon_buf);
+		printk("Longitude: %s\n", lat_buf);
+		printk("Altitude : %s\n", alt_buf);
+		printk("DevMode  : %d\n", package.developer);
+	}
+
+	cJSON *root;
+
+	// create root node and array
+	root = cJSON_CreateObject();
+
+	// add sensor data
+	cJSON_AddItemToObject(root, "Latitude", cJSON_CreateString(lon_buf));
+	cJSON_AddItemToObject(root, "Longitude", cJSON_CreateString(lat_buf));
+	cJSON_AddItemToObject(root, "Altitude", cJSON_CreateString(alt_buf));
+	cJSON_AddItemToObject(root, "Accuracy", cJSON_CreateString(acc_buf));
+	cJSON_AddItemToObject(root, "Developer", cJSON_CreateString(dev_buf));
+
+	// print everything
+	out = cJSON_Print(root);
+	if (out == NULL)
+	{
+		printk("Failed print...\n");
+	}
+	printk("%s\n", out);
+
+	// CLOUD MAGIC
+
+	transmit_to_cloud(out); // sender JSON til cloud
+
+	// Publish with MQTT
+
+	// data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
+	// out, strlen(out));
+
+	free(out);
+
+	// free all objects under root and root itself
+	// cJSON_Delete(root);
+
+	return;
+}
+
+
+
 void checkForSem(void)
 {
 	k_poll(events, 2, K_FOREVER); // Only looking for the two first sems in events
@@ -736,7 +843,7 @@ void checkForSem(void)
 		{
 
 			char payloadString[128] = {0};
-			strcpy(payloadString, ("{\"payload\":{\"lat\":%.06f}{\"lon\":%.06f}}", &last_pvt.latitude, &last_pvt.longitude));
+			strcpy(payloadString, ("{\"lat\":\"%.06f\",\"lon\":\"%.06f\"}", &last_pvt.latitude, &last_pvt.longitude));
 
 			struct cloud_msg msg = {
 				.qos = CLOUD_QOS_AT_MOST_ONCE,
@@ -746,19 +853,24 @@ void checkForSem(void)
 			cloud_send(cloud_backend, &msg);
 			// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
 
-			printk("Her skal vi sende data!");
+			printk("Data sent!");
 		}
 		else
 		{
+			pvt_to_package(&last_pvt);
+			send_struct(package);			
+
 			printk("Fix available, but we're not connected to the cloud");
 		}
 	}
 	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
-	events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
 	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
 	events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
+	// events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
 }
+
+
 
 void main(void)
 {
