@@ -100,21 +100,23 @@ static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flags that we are connec
 #define CLOUD_CONNECTED_SEM 4
 
 static struct k_poll_event events[5] = {
+
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+									K_POLL_MODE_NOTIFY_ONLY,
+									&pvt_fix_sem, 0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+									K_POLL_MODE_NOTIFY_ONLY,
+									&cloud_connected_sem, 0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+									K_POLL_MODE_NOTIFY_ONLY,
+									&lte_connected, 0),
+
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&pvt_data_sem, 0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&nmea_queue, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&pvt_fix_sem, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&lte_connected, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&cloud_connected_sem, 0),
 };
 
 // To assert the build.
@@ -711,7 +713,7 @@ int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
 
 void checkForSem(void)
 {
-	k_poll(events, 4, K_FOREVER); //
+	k_poll(events, 2, K_FOREVER); //Only looking for the two first sems in events
 	// If there is new PVT data, regardless of its validity
 	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
 		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
@@ -722,35 +724,35 @@ void checkForSem(void)
 		// print_satellite_stats(&last_pvt); // Prints sat stats
 
 		// If there is new, valid PVT data:
-		if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
-			k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
-		{
-			printk("Fix available!\n");
-			print_fix_data(&last_pvt);																									   // Prints the fix data
-			if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
-			{
-				/*struct cloud_msg msg = {
-								.qos = CLOUD_QOS_AT_MOST_ONCE,
-								.buf = &last_pvt,
-								.len = strlen(&last_pvt),
-								.endpoint = CLOUD_EP_MSG};
-				*/
-				// cloud_send(cloud_backend, &msg);
-				// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
-
-				printk("Her skal vi sende data!");
-			}
-			else
-			{
-				printk("Fix available, but we're not connected to the cloud");
-			}
-		}
-		events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
-		events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
-		events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
-		events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
-		events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	}
+	if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
+		k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
+	{
+		printk("Fix available!\n");
+		print_fix_data(&last_pvt);																									   // Prints the fix data
+		if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
+		{
+			/*struct cloud_msg msg = {
+							.qos = CLOUD_QOS_AT_MOST_ONCE,
+							.buf = &last_pvt,
+							.len = strlen(&last_pvt),
+							.endpoint = CLOUD_EP_MSG};
+			*/
+			// cloud_send(cloud_backend, &msg);
+			// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
+
+			printk("Her skal vi sende data!");
+		}
+		else
+		{
+			printk("Fix available, but we're not connected to the cloud");
+		}
+	}
+	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
+	events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
+	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
+	events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
+	events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 }
 
 void main(void)
