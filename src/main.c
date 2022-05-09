@@ -57,7 +57,7 @@ static void agps_data_get_work_fn(struct k_work *item)
 	err = assistance_request(&last_agps);
 	if (err)
 	{
-		printk("Failed to request assistance data");
+		printk("Failed to request assistance data\n");
 	}
 
 // Following is only if LTE is disconnected between communication (Its not in our application. LTE PSM FTW.)
@@ -88,11 +88,18 @@ K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4
 
 static K_SEM_DEFINE(time_sem, 0, 1);
 static K_SEM_DEFINE(lte_ready, 0, 1);
-static K_SEM_DEFINE(pvt_data_sem, 0, 1);  // This flags pvt data without a fix
-static K_SEM_DEFINE(pvt_fix_sem, 0, 1);	  // This flags pvt data with a fix
-static K_SEM_DEFINE(lte_connected, 0, 1); // This flags a successful connection
+static K_SEM_DEFINE(pvt_data_sem, 0, 1);		// This flags pvt data without a fix
+static K_SEM_DEFINE(pvt_fix_sem, 0, 1);			// This flags pvt data with a fix
+static K_SEM_DEFINE(lte_connected, 0, 1);		// This flags a successful connection
+static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flags that we are connected to the cloud
 
-static struct k_poll_event events[3] = {
+#define PVT_DATA_SEM 0
+#define NMEA_QUEUE_SEM 1
+#define PVT_FIX_SEM 2
+#define LTE_CONNECTED_SEM 3
+#define CLOUD_CONNECTED_SEM 4
+
+static struct k_poll_event events[5] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&pvt_data_sem, 0),
@@ -105,16 +112,20 @@ static struct k_poll_event events[3] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&lte_connected, 0),
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+									K_POLL_MODE_NOTIFY_ONLY,
+									&cloud_connected_sem, 0),
 };
 
 // To assert the build.
+/*
 BUILD_ASSERT(IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_GPS) ||
 				 IS_ENABLED(CONFIG_LTE_NETWORK_MODE_NBIOT_GPS) ||
 				 IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS),
 			 "CONFIG_LTE_NETWORK_MODE_LTE_M_GPS, "
 			 "CONFIG_LTE_NETWORK_MODE_NBIOT_GPS or "
-			 "CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS must be enabled");
-
+			 "CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS must be enabled\n");
+*/
 // Cloud related
 static void connect_work_fn(struct k_work *work)
 {
@@ -128,15 +139,13 @@ static void connect_work_fn(struct k_work *work)
 	err = cloud_connect(cloud_backend);
 	if (err)
 	{
-		printk("cloud_connect, error: %d", err);
+		printk("cloud_connect error: %d", err);
 	}
-	/*
-		printk("Next connection retry in %d seconds",
-				CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS);
 
-		k_work_schedule(&connect_work,
-						K_SECONDS(CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS));
-						*/
+	printk("Next connection retry in %d seconds",
+		   CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS);
+
+	k_work_schedule(&connect_work, K_SECONDS(CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS));
 }
 
 static void cloud_update_work_fn(struct k_work *work)
@@ -145,10 +154,10 @@ static void cloud_update_work_fn(struct k_work *work)
 
 	if (!cloud_connected)
 	{
-		printk("Not connected to cloud, abort cloud publication");
+		printk("Not connected to cloud, abort cloud publication\n");
 		return;
 	}
-
+	printk("THIS THREAD IS RUNNING \n");
 	struct cloud_msg msg = {
 		.qos = CLOUD_QOS_AT_MOST_ONCE,
 		.buf = CONFIG_CLOUD_MESSAGE,
@@ -159,7 +168,7 @@ static void cloud_update_work_fn(struct k_work *work)
 	 * For Azure IoT Hub and AWS IoT, messages are addressed directly to the
 	 * device twin (Azure) or device shadow (AWS).
 	 */
-	if (strcmp(CONFIG_CLOUD_BACKEND, "NRF_CLOUD") == 0)
+	if (strcmp(CONFIG_CLOUD_BACKEND, "NRF_CLOUD\n") == 0)
 	{
 		msg.endpoint.type = CLOUD_EP_MSG;
 	}
@@ -187,10 +196,10 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 	switch (evt->type)
 	{
 	case CLOUD_EVT_CONNECTING:
-		printk("CLOUD_EVT_CONNECTING");
+		printk("CLOUD_EVT_CONNECTING\n");
 		break;
 	case CLOUD_EVT_CONNECTED:
-		printk("CLOUD_EVT_CONNECTED");
+		printk("CLOUD_EVT_CONNECTED\n");
 		cloud_connected = true;
 		/* This may fail if the work item is already being processed,
 		 * but in such case, the next time the work handler is executed,
@@ -200,25 +209,23 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		(void)k_work_cancel_delayable(&connect_work);
 		break;
 	case CLOUD_EVT_READY:
-		printk("CLOUD_EVT_READY");
-#if defined(CONFIG_CLOUD_PUBLICATION_SEQUENTIAL)
-		k_work_reschedule(&cloud_update_work, K_NO_WAIT);
-#endif
+		printk("CLOUD_EVT_READY\n");
+		k_sem_give(&cloud_connected_sem);
 		break;
 	case CLOUD_EVT_DISCONNECTED:
-		printk("CLOUD_EVT_DISCONNECTED");
+		printk("CLOUD_EVT_DISCONNECTED\n");
 		cloud_connected = false;
 		k_work_reschedule(&connect_work, K_NO_WAIT);
 		break;
 	case CLOUD_EVT_ERROR:
-		printk("CLOUD_EVT_ERROR");
+		printk("CLOUD_EVT_ERROR\n");
 		break;
 	case CLOUD_EVT_DATA_SENT:
-		printk("CLOUD_EVT_DATA_SENT");
+		printk("CLOUD_EVT_DATA_SENT\n");
 		break;
 	case CLOUD_EVT_DATA_RECEIVED:
 
-		printk("CLOUD_EVT_DATA_RECEIVED");
+		printk("CLOUD_EVT_DATA_RECEIVED\n");
 		printk("Data received from cloud: %.*s",
 			   evt->data.msg.len,
 			   log_strdup(evt->data.msg.buf));
@@ -226,16 +233,16 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		break;
 
 	case CLOUD_EVT_PAIR_REQUEST:
-		printk("CLOUD_EVT_PAIR_REQUEST");
+		printk("CLOUD_EVT_PAIR_REQUEST\n");
 		break;
 	case CLOUD_EVT_PAIR_DONE:
-		printk("CLOUD_EVT_PAIR_DONE");
+		printk("CLOUD_EVT_PAIR_DONE\n");
 		break;
 	case CLOUD_EVT_FOTA_DONE:
-		printk("CLOUD_EVT_FOTA_DONE");
+		printk("CLOUD_EVT_FOTA_DONE\n");
 		break;
 	case CLOUD_EVT_FOTA_ERROR:
-		printk("CLOUD_EVT_FOTA_ERROR");
+		printk("CLOUD_EVT_FOTA_ERROR\n");
 		break;
 	default:
 		printk("Unknown cloud event type: %d", evt->type);
@@ -293,7 +300,7 @@ static void gnss_event_handler(int event)
 		/* nmea_data = k_malloc(sizeof(struct nrf_modem_gnss_nmea_data_frame));
 		if (nmea_data == NULL)
 		{
-			printk("Failed to allocate memory for NMEA");
+			printk("Failed to allocate memory for NMEA\n");
 			break;
 		}
 
@@ -322,7 +329,7 @@ static void gnss_event_handler(int event)
 									 NRF_MODEM_GNSS_DATA_AGPS_REQ);
 		if (retval == 0)
 		{
-			printk("agps_data_get_work submitted to gnss_work_q");
+			printk("agps_data_get_work submitted to gnss_work_q\n");
 			k_work_submit_to_queue(&gnss_work_q, &agps_data_get_work);
 		}
 #endif // !CONFIG_SAU_ASSISTANCE_NONE
@@ -345,7 +352,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		}
 
 		printk("Network registration status: %s",
-			   evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming");
+			   evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming\n");
 		k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
@@ -368,7 +375,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	}
 	case LTE_LC_EVT_RRC_UPDATE:
 		printk("RRC mode: %s",
-			   evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ? "Connected" : "Idle");
+			   evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ? "Connected" : "Idle\n");
 		break;
 	case LTE_LC_EVT_CELL_UPDATE:
 		printk("LTE cell changed: Cell ID: %d, Tracking area: %d",
@@ -378,7 +385,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		printk("Active LTE mode changed: %s",
 			   evt->lte_mode == LTE_LC_LTE_MODE_NONE ? "None" : evt->lte_mode == LTE_LC_LTE_MODE_LTEM ? "LTE-M"
 															: evt->lte_mode == LTE_LC_LTE_MODE_NBIOT  ? "NB-IoT"
-																									  : "Unknown");
+																									  : "Unknown\n");
 		break;
 	case LTE_LC_EVT_MODEM_EVENT:
 		printk("Modem domain event, type: %s",
@@ -386,7 +393,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 																						: evt->modem_evt == LTE_LC_MODEM_EVT_RESET_LOOP	   ? "Reset loop detected"
 																						: evt->modem_evt == LTE_LC_MODEM_EVT_BATTERY_LOW   ? "Low battery"
 																						: evt->modem_evt == LTE_LC_MODEM_EVT_OVERHEATED	   ? "Modem is overheated"
-																																		   : "Unknown");
+																																		   : "Unknown\n");
 		break;
 	default:
 		break;
@@ -401,7 +408,7 @@ static int modem_init(void)
 	{
 		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_MAGPIO) != 0) // What are these?
 		{
-			printk("Failed to set MAGPIO configuration");
+			printk("Failed to set MAGPIO configuration\n");
 			return -1;
 		}
 	}
@@ -410,7 +417,7 @@ static int modem_init(void)
 	{
 		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_COEX0) != 0) // What are these?
 		{
-			printk("Failed to set COEX0 configuration");
+			printk("Failed to set COEX0 configuration\n");
 			return -1;
 		}
 	}
@@ -419,17 +426,29 @@ static int modem_init(void)
 	{
 		date_time_register_handler(date_time_evt_handler);
 	}
-
+	int err = lte_lc_modem_events_enable();
+	if (err)
+	{
+		LOG_ERR("lte_lc_modem_events_enable failed, error: %d",
+				err);
+		return 0;
+	}
+	/*
 	if (lte_lc_init() != 0)
 	{
-		printk("Failed to initialize LTE link controller");
+		printk("Failed to initialize LTE link controller\n");
 		return -1;
 	}
+	*/
+
+	lte_lc_init_and_connect_async(lte_handler);
+	/*
 	lte_lc_register_handler(lte_handler); // Using the LTE event handler
-	lte_lc_psm_req(true);				  // Requesting LTM PSM
-	if (lte_lc_connect() != 0)			  // The actual connection
+	*/
+	lte_lc_psm_req(true);	   // Requesting LTM PSM
+	if (lte_lc_connect() != 0) // The actual connection
 	{
-		printk("Failed to connect to LTE network");
+		printk("Failed to connect to LTE network\n");
 		return -1;
 	}
 	printk("Connected to LTE network, psm true \n");
@@ -440,7 +459,7 @@ static int modem_init(void)
 		k_sem_take(&time_sem, K_MINUTES(10));
 		if (!date_time_is_valid())
 		{
-			printk("Failed to get current time, continuing anyway");
+			printk("Failed to get current time, continuing anyway\n");
 		}
 	}
 	printk("Modem init done \n");
@@ -479,7 +498,7 @@ static int gnss_init_and_start(void)
 		// Enable GNSS.
 		if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) // This activates GNSS without changing LTE.
 		{
-			printk("Failed to activate GNSS functional mode");
+			printk("Failed to activate GNSS functional mode\n");
 			return -1;
 		}
 	endif // CONFIG_SAU_ASSISTANCE_NONE
@@ -487,7 +506,7 @@ static int gnss_init_and_start(void)
 	/* Configure GNSS. */
 	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0)
 	{
-		printk("Failed to set GNSS event handler");
+		printk("Failed to set GNSS event handler\n");
 		return -1;
 	}
 	printk("Gnss handler set! \n");
@@ -501,7 +520,7 @@ static int gnss_init_and_start(void)
 
 	if (nrf_modem_gnss_nmea_mask_set(nmea_mask) != 0)
 	{
-		printk("Failed to set GNSS NMEA mask");
+		printk("Failed to set GNSS NMEA mask\n");
 		return -1;
 	}
 	printk("NMEA masks set \n");
@@ -509,11 +528,13 @@ static int gnss_init_and_start(void)
 	/* This use case flag should always be set. */
 	uint8_t use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START;
 
-	if (!IS_ENABLED(CONFIG_SAU_ASSISTANCE_NONE))
-	{
-		use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE; // Not sure about this one..
-	}
-
+	/*// We can save some data by setting this use case. However, we might be without a-gps data, which would cost more.
+	  // This can be used if we have very long time between getting fixes.
+		if (!IS_ENABLED(CONFIG_SAU_ASSISTANCE_NONE))
+		{
+			use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE;
+		}
+	*/
 	if (IS_ENABLED(CONFIG_SAU_LOW_ACCURACY)) // Allows low accuracy fixes with only 3 satelites
 	{
 		use_case |= NRF_MODEM_GNSS_USE_CASE_LOW_ACCURACY;
@@ -521,7 +542,7 @@ static int gnss_init_and_start(void)
 
 	if (nrf_modem_gnss_use_case_set(use_case) != 0)
 	{
-		printk("Failed to set GNSS use case");
+		printk("Failed to set GNSS use case\n");
 	}
 	printk("Use case set \n");
 
@@ -530,20 +551,20 @@ static int gnss_init_and_start(void)
 
 	if (nrf_modem_gnss_fix_retry_set(fix_retry) != 0)
 	{
-		printk("Failed to set GNSS fix retry");
+		printk("Failed to set GNSS fix retry\n");
 		return -1;
 	}
 
 	if (nrf_modem_gnss_fix_interval_set(fix_interval) != 0) // K_MINUTES(15) why not? Would this make the modem get a new fix every 15 minutes?
 	{
-		printk("Failed to set GNSS fix interval");
+		printk("Failed to set GNSS fix interval\n");
 		return -1;
 	}
 	printk("Set fix reset 180 and fix interval to 15 min \n");
 
 	if (nrf_modem_gnss_start() != 0)
 	{
-		printk("Failed to start GNSS");
+		printk("Failed to start GNSS\n");
 		return -1;
 	}
 	printk("gnss modem started! \n");
@@ -556,7 +577,7 @@ void lte_connect(void)
 {
 	int err;
 
-	printk("Connecting to LTE network");
+	printk("Connecting to LTE network\n");
 
 	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_LTE);
 	if (err)
@@ -583,10 +604,12 @@ void lte_disconnect(void)
 		return;
 	}
 
-	printk("LTE disconnected");
+	printk("LTE disconnected\n");
 }
 
 /* This function reads the data from the modem, stores it in &last_pvt, then shuts down the gnss modem.*/
+/* This is handled through other means, but we keep this code for reference */
+
 void get_gnss_fix(void)
 {
 	int err;
@@ -623,88 +646,116 @@ static void print_satellite_stats(struct nrf_modem_gnss_pvt_data_frame *pvt_data
 		}
 	}
 
-	printk("Tracking: %2d Using: %2d Unhealthy: %d\n", tracked, in_fix, unhealthy);
+	printk("Tracking: %2d Using: %2d Unhealthy: %d \n", tracked, in_fix, unhealthy);
 }
 
 /* Prints location PVT data*/
 static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 {
-	printk("Latitude:       %.06f\n", pvt_data->latitude);
-	printk("Longitude:      %.06f\n", pvt_data->longitude);
-	printk("Altitude:       %.01f m\n", pvt_data->altitude);
-	printk("Accuracy:       %.01f m\n", pvt_data->accuracy);
-	printk("Speed:          %.01f m/s\n", pvt_data->speed);
-	printk("Speed accuracy: %.01f m/s\n", pvt_data->speed_accuracy);
-	printk("Heading:        %.01f deg\n", pvt_data->heading);
-	printk("Date:           %04u-%02u-%02u\n",
+	printk("Latitude:       %.06f \n", pvt_data->latitude);
+	printk("Longitude:      %.06f \n", pvt_data->longitude);
+	printk("Altitude:       %.01f m \n", pvt_data->altitude);
+	printk("Accuracy:       %.01f m \n", pvt_data->accuracy);
+	printk("Speed:          %.01f m/s \n", pvt_data->speed);
+	printk("Speed accuracy: %.01f m/s \n", pvt_data->speed_accuracy);
+	printk("Heading:        %.01f deg \n", pvt_data->heading);
+	printk("Date:           %04u-%02u-%02u \n",
 		   pvt_data->datetime.year,
 		   pvt_data->datetime.month,
 		   pvt_data->datetime.day);
-	printk("Time (UTC):     %02u:%02u:%02u.%03u\n",
+	printk("Time (UTC):     %02u:%02u:%02u.%03u \n",
 		   pvt_data->datetime.hour,
 		   pvt_data->datetime.minute,
 		   pvt_data->datetime.seconds,
 		   pvt_data->datetime.ms);
-	printk("PDOP:           %.01f\n", pvt_data->pdop);
-	printk("HDOP:           %.01f\n", pvt_data->hdop);
-	printk("VDOP:           %.01f\n", pvt_data->vdop);
-	printk("TDOP:           %.01f\n", pvt_data->tdop);
+	printk("PDOP:           %.01f \n", pvt_data->pdop);
+	printk("HDOP:           %.01f \n", pvt_data->hdop);
+	printk("VDOP:           %.01f \n", pvt_data->vdop);
+	printk("TDOP:           %.01f \n", pvt_data->tdop);
 }
+
+/*This is for having default arguments in the changeIntervalAndRetryTime function*/
+typedef struct
+{
+	int fix_interval_min;
+	int fix_retry_sec;
+} changeIntervalAndRetryTime_args;
+
+/* This function changes the interval and retry time for getting gps fix. This is to be controlled from the cloud*/
+int16_t changeIntervalAndRetryTime_base(int fix_interval_min, int fix_retry_sec)
+{
+	if (nrf_modem_gnss_fix_retry_set(fix_retry_sec) != 0)
+	{
+		printk("Failed to set GNSS fix retry\n");
+		return -1;
+	}
+
+	if (nrf_modem_gnss_fix_interval_set(fix_interval_min * 60) != 0)
+	{
+		printk("Failed to set GNSS fix interval\n");
+		return -1;
+	}
+	printk("Set fix reset to %d sec and fix interval to %d min ", fix_interval_min, fix_retry_sec);
+	return 0;
+}
+
+/*This is for having default arguments in the changeIntervalAndRetryTime function*/
+int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
+{
+	int i_out = in.fix_interval_min ? in.fix_interval_min : 15;
+	int x_out = in.fix_retry_sec ? in.fix_retry_sec : 180;
+	return changeIntervalAndRetryTime_base(i_out, x_out);
+}
+/*This is for having default arguments in the changeIntervalAndRetryTime function*/
+#define changeIntervalAndRetryTime(...) var_changeIntervalAndRetryTime((changeIntervalAndRetryTime_args){__VA_ARGS__});
 
 void checkForSem(void)
 {
-	k_poll(events, 3, K_FOREVER); //
+	k_poll(events, 4, K_FOREVER); //
 	// If there is new PVT data, regardless of its validity
-	if (events[0].state == K_POLL_STATE_SEM_AVAILABLE &&
-		k_sem_take(events[0].sem, K_NO_WAIT) == 0)
+	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
+		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
 	{
-		// printk("\033[1;1H"); // These two lines clears the console between printing
-		// printk("\033[2J");
-		print_satellite_stats(&last_pvt); // Prints sat stats
+
+		// printk("\033[1;1H\n"); // These two lines clears the console between printing
+		// printk("\033[2J\n");
+		// print_satellite_stats(&last_pvt); // Prints sat stats
 
 		// If there is new, valid PVT data:
-		if (events[2].state == K_POLL_STATE_SEM_AVAILABLE &&
-			k_sem_take(events[2].sem, K_NO_WAIT) == 0)
+		if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
+			k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
 		{
-			printk("Fix available!");
-			// print_fix_data(&last_pvt); // Prints the fix data
+			printk("Fix available!\n");
+			print_fix_data(&last_pvt);																									   // Prints the fix data
+			if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
+			{
+				/*struct cloud_msg msg = {
+								.qos = CLOUD_QOS_AT_MOST_ONCE,
+								.buf = &last_pvt,
+								.len = strlen(&last_pvt),
+								.endpoint = CLOUD_EP_MSG};
+				*/
+				// cloud_send(cloud_backend, &msg);
+				// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
 
-			struct cloud_msg msg = {
-				.qos = CLOUD_QOS_AT_MOST_ONCE,
-				.buf = &last_pvt,
-				.len = strlen(&last_pvt),
-				.endpoint = CLOUD_EP_MSG};
-
-			cloud_send(cloud_backend, &msg);
-
-			// Her skal vi sende data!
+				printk("Her skal vi sende data!");
+			}
+			else
+			{
+				printk("Fix available, but we're not connected to the cloud");
+			}
 		}
-		events[0].state = K_POLL_STATE_NOT_READY;
-		events[1].state = K_POLL_STATE_NOT_READY;
-		events[2].state = K_POLL_STATE_NOT_READY;
+		events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
+		events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
+		events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
+		events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
+		events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	}
-}
-
-int16_t changeIntervalAndRetryTime(int fix_interval, int fix_retry)
-{
-
-	if (nrf_modem_gnss_fix_retry_set(fix_retry) != 0)
-	{
-		printk("Failed to set GNSS fix retry");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_interval_set(fix_interval * 60) != 0) // K_MINUTES(15) why not? Would this make the modem get a new fix every 15 minutes?
-	{
-		printk("Failed to set GNSS fix interval");
-		return -1;
-	}
-	printk("Set fix reset to %d sec and fix interval to %d min \n", fix_interval, fix_retry);
-	return 0;
 }
 
 void main(void)
 {
+	work_init(); // Cloud related work fn
 	modem_init();
 	sample_init(); // Assistance_init is called here
 	gnss_init_and_start();
@@ -718,8 +769,9 @@ void main(void)
 		printk("Cloud backend could not be initialized, error: %d",
 			   err);
 	}
-	work_init(); // Cloud related work fn
+	work_init();
 
+	k_work_schedule(&connect_work, K_NO_WAIT); // This thread connects to the cloud
 	for (;;)
 	{
 		checkForSem(); // Polling function
