@@ -95,10 +95,10 @@ static K_SEM_DEFINE(pvt_fix_sem, 0, 1);			// This flags pvt data with a fix
 static K_SEM_DEFINE(lte_connected, 0, 1);		// This flags a successful connection
 static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flags that we are connected to the cloud
 
-#define PVT_DATA_SEM 0
-#define PVT_FIX_SEM 1
+#define PVT_FIX_SEM 0
+#define CLOUD_CONNECTED_SEM 1
 #define LTE_CONNECTED_SEM 2
-#define CLOUD_CONNECTED_SEM 3
+#define PVT_DATA_SEM 3
 //#define NMEA_QUEUE_SEM 4
 
 static struct k_poll_event events[4] = {
@@ -714,7 +714,6 @@ int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
 /*This is for having default arguments in the changeIntervalAndRetryTime function*/
 #define changeIntervalAndRetryTime(...) var_changeIntervalAndRetryTime((changeIntervalAndRetryTime_args){__VA_ARGS__});
 
-
 struct json
 {
 	double longitude;
@@ -816,49 +815,35 @@ static void send_struct(struct json package)
 	return;
 }
 
-
-
 void checkForSem(void)
 {
-	k_poll(events, 2, K_FOREVER); // Only looking for the two first sems in events
+	k_poll(events, 1, K_FOREVER); // Only looking for the  first sem in events
 	// If there is new PVT data, regardless of its validity
+
 	/*
-	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
-		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
-	{
+		if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
+			k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
+		{
 
-		// printk("\033[1;1H\n"); // These two lines clears the console between printing
-		// printk("\033[2J\n");
-		// print_satellite_stats(&last_pvt); // Prints sat stats
+			printk("\033[1;1H\n"); // These two lines clears the console between printing
+			printk("\033[2J\n");
+			print_satellite_stats(&last_pvt); // Prints sat stats
 
-		// If there is new, valid PVT data:
-	}
-	*/
+			// If there is new, valid PVT data:
+		}*/
+
 	if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
 		k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
 	{
 		printk("Fix available!\n");
-		print_fix_data(&last_pvt);																									   // Prints the fix data
+		print_fix_data(&last_pvt);		   // Prints the fix data
 		if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
 		{
-
-			char payloadString[128] = {0};
-			strcpy(payloadString, ("{\"lat\":\"%.06f\",\"lon\":\"%.06f\"}", &last_pvt.latitude, &last_pvt.longitude));
-
-			struct cloud_msg msg = {
-				.qos = CLOUD_QOS_AT_MOST_ONCE,
-				.buf = payloadString,
-				.len = strlen(payloadString)};
-
-			cloud_send(cloud_backend, &msg);
-			// k_work_schedule(&cloud_update_work, K_NO_WAIT); // Keeping this for reference
-
-			printk("Data sent!");
+			pvt_to_package(&last_pvt);
+			send_struct(package);
 		}
 		else
 		{
-			pvt_to_package(&last_pvt);
-			send_struct(package);			
 
 			printk("Fix available, but we're not connected to the cloud");
 		}
@@ -869,8 +854,6 @@ void checkForSem(void)
 	events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
 }
-
-
 
 void main(void)
 {
