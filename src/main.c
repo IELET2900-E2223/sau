@@ -88,34 +88,33 @@ bool cloud_connected; // Flags if we are connected to the cloud. Used for error 
 
 // K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4);
 
-static K_SEM_DEFINE(time_sem, 0, 1);
-static K_SEM_DEFINE(lte_ready, 0, 1);
-static K_SEM_DEFINE(pvt_data_sem, 0, 1);		// This flags pvt data without a fix
-static K_SEM_DEFINE(pvt_fix_sem, 0, 1);			// This flags pvt data with a fix
-static K_SEM_DEFINE(lte_connected, 0, 1);		// This flags a successful connection
-static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flags that we are connected to the cloud
+// static K_SEM_DEFINE(lte_ready, 0, 1);
+static K_SEM_DEFINE(pvt_data_sem, 0, 1);  // This flags pvt data without a fix
+static K_SEM_DEFINE(pvt_fix_sem, 0, 1);	  // This flags pvt data with a fix
+static K_SEM_DEFINE(lte_connected, 0, 1); // This flags a successful connection
+// static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flag that we are connected to the cloud
 
 #define PVT_FIX_SEM 0
-#define CLOUD_CONNECTED_SEM 1
-#define LTE_CONNECTED_SEM 2
-#define PVT_DATA_SEM 3
+#define PVT_DATA_SEM 1
+//#define CLOUD_CONNECTED_SEM 1
+//#define LTE_CONNECTED_SEM 2
 //#define NMEA_QUEUE_SEM 4
 
-static struct k_poll_event events[4] = {
+static struct k_poll_event events[3] = {
 
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&pvt_fix_sem, 0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
+									&pvt_data_sem, 0),
+	/*
+	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
+									K_POLL_MODE_NOTIFY_ONLY,
 									&cloud_connected_sem, 0),
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&lte_connected, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&pvt_data_sem, 0),
-	/*
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&nmea_queue, 0),
@@ -216,7 +215,7 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		break;
 	case CLOUD_EVT_READY:
 		printk("CLOUD_EVT_READY\n");
-		k_sem_give(&cloud_connected_sem);
+		// k_sem_give(&cloud_connected_sem);
 		break;
 	case CLOUD_EVT_DISCONNECTED:
 		printk("CLOUD_EVT_DISCONNECTED\n");
@@ -269,12 +268,6 @@ void nrf_modem_recoverable_error_handler(uint32_t error)
 	printk("Modem library recoverable error: %u", error);
 }
 
-/* Handler for date time library */
-static void date_time_evt_handler(const struct date_time_evt *evt) // How does this work? Where does it get time?
-{
-	k_sem_give(&time_sem); // Flags that time is set? how?
-}
-
 /* GNSS event handler*/
 static void gnss_event_handler(int event)
 {
@@ -298,7 +291,7 @@ static void gnss_event_handler(int event)
 
 		if (retval == 0)
 		{
-			k_sem_give(&pvt_fix_sem); // This flags K_POLL_STATE_SEM_AVAILABLE ?
+			k_sem_give(&pvt_fix_sem); // This flags K_POLL_STATE_SEM_AVAILABLE
 		}
 		break;
 	case NRF_MODEM_GNSS_EVT_NMEA:
@@ -359,7 +352,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 
 		printk("Network registration status: %s",
 			   evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming\n");
-		k_sem_give(&lte_connected);
+		// k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		printk("PSM parameter update: TAU: %d, Active time: %d",
@@ -406,7 +399,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	}
 }
 
-/* Connects to LTE, sets mode, initiates date/time*/
+/* Connects to LTE, sets mode,*/
 static int modem_init(void)
 {
 	// Configuring SAU_MAGPOI for nrd9160dk
@@ -428,10 +421,6 @@ static int modem_init(void)
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_DATE_TIME))
-	{
-		date_time_register_handler(date_time_evt_handler);
-	}
 	int err = lte_lc_modem_events_enable();
 	if (err)
 	{
@@ -458,16 +447,7 @@ static int modem_init(void)
 		return -1;
 	}
 	printk("Connected to LTE network, psm true \n");
-	if (IS_ENABLED(CONFIG_DATE_TIME))
-	{
-		printk("Waiting for current time \n");
-		/* Wait for an event from the Date Time library. */
-		k_sem_take(&time_sem, K_MINUTES(10));
-		if (!date_time_is_valid())
-		{
-			printk("Failed to get current time, continuing anyway\n");
-		}
-	}
+
 	printk("Modem init done \n");
 	return 0;
 }
@@ -491,12 +471,11 @@ static int sample_init(void)
 	printk("work_queue_start done \n");
 	k_work_init(&agps_data_get_work, agps_data_get_work_fn);
 
-	err = assistance_init(&gnss_work_q); // See the Cmake file from the sample!
+	err = assistance_init(&gnss_work_q);
 	printk("Assistance init done \n");
 #endif /* !CONFIG_SAU_ASSISTANCE_NONE */
 	return err;
 }
-// PGPS TING
 
 static int gnss_init_and_start(void)
 {
@@ -553,7 +532,7 @@ static int gnss_init_and_start(void)
 	printk("Use case set \n");
 
 	uint16_t fix_retry = 180;
-	uint16_t fix_interval = 60 * 15;
+	uint16_t fix_interval = 60 * 5;
 
 	if (nrf_modem_gnss_fix_retry_set(fix_retry) != 0)
 	{
@@ -561,7 +540,7 @@ static int gnss_init_and_start(void)
 		return -1;
 	}
 
-	if (nrf_modem_gnss_fix_interval_set(fix_interval) != 0) // K_MINUTES(15) why not? Would this make the modem get a new fix every 15 minutes?
+	if (nrf_modem_gnss_fix_interval_set(fix_interval) != 0) // Would this make the modem get a new fix every fix_interval minutes
 	{
 		printk("Failed to set GNSS fix interval\n");
 		return -1;
@@ -576,56 +555,6 @@ static int gnss_init_and_start(void)
 	printk("gnss modem started! \n");
 
 	return 0;
-}
-
-/* Function to connect to LTE without interfering with GNSS. Used only if we want to turn off LTE.*/
-void lte_connect(void)
-{
-	int err;
-
-	printk("Connecting to LTE network\n");
-
-	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_LTE);
-	if (err)
-	{
-		printk("Failed to activate LTE, error: %d", err);
-		return;
-	}
-
-	k_sem_take(&lte_ready, K_FOREVER);
-
-	/* Wait for a while, because with IPv4v6 PDN the IPv6 activation takes a bit more time. */
-	k_sleep(K_SECONDS(1));
-}
-
-/* Function to disconnect from LTE without interfering with GNSS. Used only if we want to turn off LTE.*/
-void lte_disconnect(void)
-{
-	int err;
-
-	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_DEACTIVATE_LTE);
-	if (err)
-	{
-		printk("Failed to deactivate LTE, error: %d", err);
-		return;
-	}
-
-	printk("LTE disconnected\n");
-}
-
-/* This function reads the data from the modem, stores it in &last_pvt, then shuts down the gnss modem.*/
-/* This is handled through other means, but we keep this code for reference */
-
-void get_gnss_fix(void)
-{
-	int err;
-	int retval;
-	retval = nrf_modem_gnss_read(&last_pvt, sizeof(last_pvt), NRF_MODEM_GNSS_DATA_PVT);
-	if (retval == 0)
-	{
-		k_sem_give(&pvt_data_sem);
-		err = nrf_modem_gnss_stop(); // Stops the gnss modem after the fix is pulled from it
-	}
 }
 
 /* Prints satellite data; number of healthy satellites.*/
@@ -679,41 +608,6 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	printk("TDOP:           %.01f \n", pvt_data->tdop);
 }
 
-/*This is for having default arguments in the changeIntervalAndRetryTime function*/
-typedef struct
-{
-	int fix_interval_min;
-	int fix_retry_sec;
-} changeIntervalAndRetryTime_args;
-
-/* This function changes the interval and retry time for getting gps fix. This is to be controlled from the cloud*/
-int16_t changeIntervalAndRetryTime_base(int fix_interval_min, int fix_retry_sec)
-{
-	if (nrf_modem_gnss_fix_retry_set(fix_retry_sec) != 0)
-	{
-		printk("Failed to set GNSS fix retry\n");
-		return -1;
-	}
-
-	if (nrf_modem_gnss_fix_interval_set(fix_interval_min * 60) != 0)
-	{
-		printk("Failed to set GNSS fix interval\n");
-		return -1;
-	}
-	printk("Set fix reset to %d sec and fix interval to %d min ", fix_interval_min, fix_retry_sec);
-	return 0;
-}
-
-/*This is for having default arguments in the changeIntervalAndRetryTime function*/
-int16_t var_changeIntervalAndRetryTime(changeIntervalAndRetryTime_args in)
-{
-	int i_out = in.fix_interval_min ? in.fix_interval_min : 15;
-	int x_out = in.fix_retry_sec ? in.fix_retry_sec : 180;
-	return changeIntervalAndRetryTime_base(i_out, x_out);
-}
-/*This is for having default arguments in the changeIntervalAndRetryTime function*/
-#define changeIntervalAndRetryTime(...) var_changeIntervalAndRetryTime((changeIntervalAndRetryTime_args){__VA_ARGS__});
-
 struct json
 {
 	double longitude;
@@ -748,6 +642,7 @@ void pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	package.latitude = pvt_data->latitude;
 	package.altitude = pvt_data->altitude;
 	package.accuracy = pvt_data->accuracy;
+	
 }
 
 static void send_struct(struct json package)
@@ -817,41 +712,37 @@ static void send_struct(struct json package)
 
 void checkForSem(void)
 {
-	k_poll(events, 1, K_FOREVER); // Only looking for the  first sem in events
-	// If there is new PVT data, regardless of its validity
-
-	/*
-		if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
-			k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
-		{
-
-			printk("\033[1;1H\n"); // These two lines clears the console between printing
-			printk("\033[2J\n");
-			print_satellite_stats(&last_pvt); // Prints sat stats
-
-			// If there is new, valid PVT data:
-		}*/
-
+	k_poll(events, 2, K_FOREVER); // Looking at semaphores for gnss
+	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
+		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
+	{
+		// printk("\033[1;1H\n"); // These two lines clears the console between printing
+		// printk("\033[2J\n");
+		print_satellite_stats(&last_pvt); // Prints sat stats
+	}
+	// If there is new, valid PVT data:
 	if (events[PVT_FIX_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
 		k_sem_take(events[PVT_FIX_SEM].sem, K_NO_WAIT) == 0)
 	{
 		printk("Fix available!\n");
-		print_fix_data(&last_pvt);		   // Prints the fix data
-		if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
+		print_fix_data(&last_pvt); // Prints the fix data
+								   // if (events[CLOUD_CONNECTED_SEM].state == K_POLL_STATE_SEM_AVAILABLE && k_sem_take(events[CLOUD_CONNECTED_SEM].sem, K_NO_WAIT)) // Nested semchecks! Future is now.
+		//{
+		if (cloud_connected)
 		{
 			pvt_to_package(&last_pvt);
 			send_struct(package);
+			printk("Data sent!");
 		}
 		else
 		{
-
 			printk("Fix available, but we're not connected to the cloud");
 		}
 	}
 	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
 	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
-	events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
-	events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
+	// events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
+	// events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
 }
 
