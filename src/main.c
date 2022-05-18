@@ -121,15 +121,6 @@ static struct k_poll_event events[3] = {
 									*/
 };
 
-struct json
-{
-	double longitude;
-	double latitude;
-	float altitude;
-	float accuracy;
-	int developer;
-};
-
 struct cloud_data
 {
 	int developer;
@@ -139,6 +130,15 @@ struct cloud_data
 	double lat_min;
 	double lon_max;
 	double lon_min;
+};
+
+struct json
+{
+	double longitude;
+	double latitude;
+	float altitude;
+	float accuracy;
+	int developer;
 };
 
 struct json package;
@@ -696,14 +696,7 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	printk("TDOP:           %.01f \n", pvt_data->tdop);
 }
 
-struct json
-{
-	double longitude;
-	double latitude;
-	float altitude;
-	float accuracy;
-	int developer;
-};
+
 
 
 void transmit_to_cloud(char *message)
