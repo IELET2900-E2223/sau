@@ -121,6 +121,28 @@ static struct k_poll_event events[3] = {
 									*/
 };
 
+struct json
+{
+	double longitude;
+	double latitude;
+	float altitude;
+	float accuracy;
+	int developer;
+};
+
+struct cloud_data
+{
+	int developer;
+	int fix_retry;
+	int fix_interval;
+	double lat_max;
+	double lat_min;
+	double lon_max;
+	double lon_min;
+};
+
+struct json package;
+struct cloud_data from_cloud;
 // To assert the build.
 /*
 BUILD_ASSERT(IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_GPS) ||
@@ -191,6 +213,71 @@ static void cloud_update_work_fn(struct k_work *work)
 
 // Cloud event handler
 
+int cloud_message_parser(char* json_from_cloud) {
+	
+	const cJSON *var = NULL;
+	
+	cJSON *json = cJSON_Parse(json_from_cloud);
+	if (json == NULL) {
+		printk("empty JSON string in json_parser()");
+	}
+	
+	var = cJSON_GetObjectItemCaseSensitive(json, "Developer");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives developer update from cloud
+	from_cloud.developer = atoi(var->valuestring);
+	printk("Developer mode changed to %d", from_cloud.developer);
+	}
+	
+	var = cJSON_GetObjectItemCaseSensitive(json, "fix_rates");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_rates update from cloud
+		from_cloud.fix_retry = atoi(var->valuestring);
+		nrf_modem_gnss_fix_retry_set(atoi(var->valuestring));	
+	}
+
+	var = cJSON_GetObjectItemCaseSensitive(json, "fix_interval");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+		from_cloud.fix_interval = atoi(var->valuestring);
+		nrf_modem_gnss_fix_interval_set(atoi(var->valuestring));
+	}
+
+	var = cJSON_GetObjectItemCaseSensitive(json, "lat_max");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+		from_cloud.lat_max = atoi(var->valuestring);
+	}
+	var = cJSON_GetObjectItemCaseSensitive(json, "lat_min");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+		from_cloud.lat_min = atoi(var->valuestring);
+	}
+	var = cJSON_GetObjectItemCaseSensitive(json, "lon_max");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+		from_cloud.lon_max = atoi(var->valuestring);
+	}
+	var = cJSON_GetObjectItemCaseSensitive(json, "lon_min");
+	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+		from_cloud.lon_min = atoi(var->valuestring);
+	}
+
+
+
+	//printk("Developer from cloud parsed json: %d \n", output);
+	cJSON_Delete(json);
+
+	return 1;
+}
+
+bool in_geofence() {
+	if (package.latitude < from_cloud.lat_max && 
+		package.latitude > from_cloud.lat_min && 
+		package.longitude < from_cloud.lon_max && 
+		package.longitude > from_cloud.lon_min) 
+	{
+		return true;
+	}
+	else {
+		return false;
+	}
+}
+
 void cloud_event_handler(const struct cloud_backend *const backend,
 						 const struct cloud_event *const evt,
 						 void *user_data)
@@ -234,6 +321,7 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		printk("Data received from cloud: %.*s",
 			   evt->data.msg.len,
 			   log_strdup(evt->data.msg.buf));
+			   cloud_message_parser(evt->data.msg.buf);
 		// Her må vi lagre dataen, og agere på den!
 		break;
 
@@ -617,7 +705,6 @@ struct json
 	int developer;
 };
 
-struct json package;
 
 void transmit_to_cloud(char *message)
 {
@@ -705,7 +792,7 @@ static void send_struct(struct json package)
 	free(out);
 
 	// free all objects under root and root itself
-	// cJSON_Delete(root);
+	cJSON_Delete(root);
 
 	return;
 }
@@ -739,8 +826,9 @@ void checkForSem(void)
 			printk("Fix available, but we're not connected to the cloud");
 		}
 	}
-	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
+	
 	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
+	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
