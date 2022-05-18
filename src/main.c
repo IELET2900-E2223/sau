@@ -74,7 +74,7 @@ static void agps_data_get_work_fn(struct k_work *item)
 
 // Cloud related variables
 static struct cloud_backend *cloud_backend;
-static struct k_work_delayable cloud_update_work;
+// static struct k_work_delayable cloud_update_work;
 static struct k_work_delayable connect_work;
 
 // Unused, but really cool. Might use in a future version
@@ -82,25 +82,17 @@ static struct k_work_delayable connect_work;
 
 // For fix data
 static struct nrf_modem_gnss_pvt_data_frame last_pvt;
-static uint64_t fix_timestamp;
 
 bool cloud_connected; // Flags if we are connected to the cloud. Used for error handling.
 
-// K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4);
-
-// static K_SEM_DEFINE(lte_ready, 0, 1);
 static K_SEM_DEFINE(pvt_data_sem, 0, 1);  // This flags pvt data without a fix
 static K_SEM_DEFINE(pvt_fix_sem, 0, 1);	  // This flags pvt data with a fix
 static K_SEM_DEFINE(lte_connected, 0, 1); // This flags a successful connection
-// static K_SEM_DEFINE(cloud_connected_sem, 0, 1); // This flag that we are connected to the cloud
 
 #define PVT_FIX_SEM 0
 #define PVT_DATA_SEM 1
-//#define CLOUD_CONNECTED_SEM 1
-//#define LTE_CONNECTED_SEM 2
-//#define NMEA_QUEUE_SEM 4
 
-static struct k_poll_event events[3] = {
+static struct k_poll_event events[2] = {
 
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
@@ -108,17 +100,6 @@ static struct k_poll_event events[3] = {
 	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
 									K_POLL_MODE_NOTIFY_ONLY,
 									&pvt_data_sem, 0),
-	/*
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&cloud_connected_sem, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_SEM_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&lte_connected, 0),
-	K_POLL_EVENT_STATIC_INITIALIZER(K_POLL_TYPE_MSGQ_DATA_AVAILABLE,
-									K_POLL_MODE_NOTIFY_ONLY,
-									&nmea_queue, 0),
-									*/
 };
 
 struct cloud_data
@@ -143,17 +124,8 @@ struct json
 
 struct json package;
 struct cloud_data from_cloud;
-// To assert the build.
-/*
-BUILD_ASSERT(IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_GPS) ||
-				 IS_ENABLED(CONFIG_LTE_NETWORK_MODE_NBIOT_GPS) ||
-				 IS_ENABLED(CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS),
-			 "CONFIG_LTE_NETWORK_MODE_LTE_M_GPS, "
-			 "CONFIG_LTE_NETWORK_MODE_NBIOT_GPS or "
-			 "CONFIG_LTE_NETWORK_MODE_LTE_M_NBIOT_GPS must be enabled\n");
-*/
-// Cloud related
 
+/* Thread for connecting to the cloud. Will always retry if unsuccessful */
 static void connect_work_fn(struct k_work *work)
 {
 	int err;
@@ -175,6 +147,8 @@ static void connect_work_fn(struct k_work *work)
 	k_work_schedule(&connect_work, K_SECONDS(CONFIG_CLOUD_CONNECTION_RETRY_TIMEOUT_SECONDS));
 }
 
+/* Unused thread for sending stuff to the cloud. Kept for reference. */
+/*
 static void cloud_update_work_fn(struct k_work *work)
 {
 	int err;
@@ -184,100 +158,115 @@ static void cloud_update_work_fn(struct k_work *work)
 		printk("Not connected to cloud, abort cloud publication\n");
 		return;
 	}
-	printk("THIS THREAD IS RUNNING \n");
+
 	struct cloud_msg msg = {
 		.qos = CLOUD_QOS_AT_MOST_ONCE,
 		.buf = CONFIG_CLOUD_MESSAGE,
 		.len = strlen(CONFIG_CLOUD_MESSAGE)};
-
-	/* When using the nRF Cloud backend data is sent to the message topic.
-	 * This is in order to visualize the data in the web UI terminal.
-	 * For Azure IoT Hub and AWS IoT, messages are addressed directly to the
-	 * device twin (Azure) or device shadow (AWS).
-	 */
-	if (strcmp(CONFIG_CLOUD_BACKEND, "NRF_CLOUD\n") == 0)
-	{
-		msg.endpoint.type = CLOUD_EP_MSG;
-	}
-	else
-	{
-		msg.endpoint.type = CLOUD_EP_STATE;
-	}
-
-	err = cloud_send(cloud_backend, &msg);
-	if (err)
-	{
-		printk("cloud_send failed, error: %d", err);
-	}
+*/
+/* When using the nRF Cloud backend data is sent to the message topic.
+ * This is in order to visualize the data in the web UI terminal.
+ * For Azure IoT Hub and AWS IoT, messages are addressed directly to the
+ * device twin (Azure) or device shadow (AWS).
+ */
+/*
+if (strcmp(CONFIG_CLOUD_BACKEND, "NRF_CLOUD\n") == 0)
+{
+	msg.endpoint.type = CLOUD_EP_MSG;
+}
+else
+{
+	msg.endpoint.type = CLOUD_EP_STATE;
 }
 
+err = cloud_send(cloud_backend, &msg);
+if (err)
+{
+	printk("cloud_send failed, error: %d", err);
+}
+}
+*/
 // Cloud event handler
 
-int cloud_message_parser(char* json_from_cloud) {
-	
+/* This function analyzes a string sent from the cloud. Its used to changing interval, retry time or enabling developer mode. */
+int cloud_message_parser(char *json_from_cloud)
+{
+
 	const cJSON *var = NULL;
-	
+
 	cJSON *json = cJSON_Parse(json_from_cloud);
-	if (json == NULL) {
+	if (json == NULL)
+	{
 		printk("empty JSON string in json_parser()");
 	}
-	
+
 	var = cJSON_GetObjectItemCaseSensitive(json, "Developer");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives developer update from cloud
-	from_cloud.developer = atoi(var->valuestring);
-	printk("Developer mode changed to %d", from_cloud.developer);
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives developer update from cloud
+		from_cloud.developer = atoi(var->valuestring);
+		printk("Developer mode changed to %d", from_cloud.developer);
 	}
-	
+
 	var = cJSON_GetObjectItemCaseSensitive(json, "fix_rates");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_rates update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_rates update from cloud
 		from_cloud.fix_retry = atoi(var->valuestring);
-		nrf_modem_gnss_fix_retry_set(atoi(var->valuestring));	
+		nrf_modem_gnss_fix_retry_set(atoi(var->valuestring));
 	}
 
 	var = cJSON_GetObjectItemCaseSensitive(json, "fix_interval");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_interval update from cloud
 		from_cloud.fix_interval = atoi(var->valuestring);
 		nrf_modem_gnss_fix_interval_set(atoi(var->valuestring));
 	}
 
 	var = cJSON_GetObjectItemCaseSensitive(json, "lat_max");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_interval update from cloud
 		from_cloud.lat_max = atoi(var->valuestring);
 	}
 	var = cJSON_GetObjectItemCaseSensitive(json, "lat_min");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_interval update from cloud
 		from_cloud.lat_min = atoi(var->valuestring);
 	}
 	var = cJSON_GetObjectItemCaseSensitive(json, "lon_max");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_interval update from cloud
 		from_cloud.lon_max = atoi(var->valuestring);
 	}
 	var = cJSON_GetObjectItemCaseSensitive(json, "lon_min");
-	if (cJSON_IsString(var)) { //Add wanted functionality when it receives fix_interval update from cloud
+	if (cJSON_IsString(var))
+	{ // Add wanted functionality when it receives fix_interval update from cloud
 		from_cloud.lon_min = atoi(var->valuestring);
 	}
 
-
-
-	//printk("Developer from cloud parsed json: %d \n", output);
+	// printk("Developer from cloud parsed json: %d \n", output);
 	cJSON_Delete(json);
 
 	return 1;
 }
 
-bool in_geofence() {
-	if (package.latitude < from_cloud.lat_max && 
-		package.latitude > from_cloud.lat_min && 
-		package.longitude < from_cloud.lon_max && 
-		package.longitude > from_cloud.lon_min) 
+/* 	This function is used for checking if the sheep is inside a fixed geofence.
+	If its still inside, we won't have to send the data.
+	Meant for future expansions.	*/
+bool in_geofence()
+{
+	if (package.latitude < from_cloud.lat_max &&
+		package.latitude > from_cloud.lat_min &&
+		package.longitude < from_cloud.lon_max &&
+		package.longitude > from_cloud.lon_min)
 	{
 		return true;
 	}
-	else {
+	else
+	{
 		return false;
 	}
 }
 
+/* Handler for cloud based events. Used to flag if we are connected, and reconnect if connection is lost. */
 void cloud_event_handler(const struct cloud_backend *const backend,
 						 const struct cloud_event *const evt,
 						 void *user_data)
@@ -302,7 +291,7 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		break;
 	case CLOUD_EVT_READY:
 		printk("CLOUD_EVT_READY\n");
-		// k_sem_give(&cloud_connected_sem);
+
 		break;
 	case CLOUD_EVT_DISCONNECTED:
 		printk("CLOUD_EVT_DISCONNECTED\n");
@@ -321,8 +310,7 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 		printk("Data received from cloud: %.*s",
 			   evt->data.msg.len,
 			   log_strdup(evt->data.msg.buf));
-			   cloud_message_parser(evt->data.msg.buf);
-		// Her må vi lagre dataen, og agere på den!
+		cloud_message_parser(evt->data.msg.buf); // This cloud message parser does the magic! Acts on given keyword from the cloud.
 		break;
 
 	case CLOUD_EVT_PAIR_REQUEST:
@@ -345,7 +333,7 @@ void cloud_event_handler(const struct cloud_backend *const backend,
 
 static void work_init(void)
 {
-	k_work_init_delayable(&cloud_update_work, cloud_update_work_fn);
+	// k_work_init_delayable(&cloud_update_work, cloud_update_work_fn); //Kept for reference
 	k_work_init_delayable(&connect_work, connect_work_fn);
 }
 
@@ -356,11 +344,10 @@ void nrf_modem_recoverable_error_handler(uint32_t error)
 	printk("Modem library recoverable error: %u", error);
 }
 
-/* GNSS event handler*/
+/* GNSS event handler. Flags new pvt-data and valid pvt-data. */
 static void gnss_event_handler(int event)
 {
 	int retval;
-	// struct nrf_modem_gnss_nmea_data_frame *nmea_data; //We don't really care about nmea data, only pvt. So the modem handles it all.
 
 	switch (event)
 	{
@@ -383,7 +370,7 @@ static void gnss_event_handler(int event)
 		}
 		break;
 	case NRF_MODEM_GNSS_EVT_NMEA:
-		// We chose to not use this, but keep it for future reference.
+		// We chose to not use this, but kept it for future reference.
 		/* nmea_data = k_malloc(sizeof(struct nrf_modem_gnss_nmea_data_frame));
 		if (nmea_data == NULL)
 		{
@@ -420,13 +407,12 @@ static void gnss_event_handler(int event)
 			k_work_submit_to_queue(&gnss_work_q, &agps_data_get_work);
 		}
 #endif // !CONFIG_SAU_ASSISTANCE_NONE
-
 		break;
 	default:
 		break;
 	}
 }
-// LTE Event handler
+/*  LTE Event handler. This is only used for info when testing. Its not needed in the final product. */
 static void lte_handler(const struct lte_lc_evt *const evt)
 {
 	switch (evt->type)
@@ -490,19 +476,19 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 /* Connects to LTE, sets mode,*/
 static int modem_init(void)
 {
-	// Configuring SAU_MAGPOI for nrd9160dk
+	// Configures the antenna and LNA
 	if (strlen(CONFIG_SAU_AT_MAGPIO) > 0)
 	{
-		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_MAGPIO) != 0) // What are these?
+		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_MAGPIO) != 0)
 		{
 			printk("Failed to set MAGPIO configuration\n");
 			return -1;
 		}
 	}
-	// Configuring SAU_COEX0 for nrd9160dk
+	// Configures the antenna and LNA
 	if (strlen(CONFIG_SAU_AT_COEX0) > 0)
 	{
-		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_COEX0) != 0) // What are these?
+		if (nrf_modem_at_printf("%s", CONFIG_SAU_AT_COEX0) != 0)
 		{
 			printk("Failed to set COEX0 configuration\n");
 			return -1;
@@ -516,18 +502,9 @@ static int modem_init(void)
 				err);
 		return 0;
 	}
-	/*
-	if (lte_lc_init() != 0)
-	{
-		printk("Failed to initialize LTE link controller\n");
-		return -1;
-	}
-	*/
 
 	lte_lc_init_and_connect_async(lte_handler);
-	/*
-	lte_lc_register_handler(lte_handler); // Using the LTE event handler
-	*/
+
 	lte_lc_psm_req(true);	   // Requesting LTM PSM
 	if (lte_lc_connect() != 0) // The actual connection
 	{
@@ -696,9 +673,6 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	printk("TDOP:           %.01f \n", pvt_data->tdop);
 }
 
-
-
-
 void transmit_to_cloud(char *message)
 {
 
@@ -722,7 +696,6 @@ void pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	package.latitude = pvt_data->latitude;
 	package.altitude = pvt_data->altitude;
 	package.accuracy = pvt_data->accuracy;
-	
 }
 
 static void send_struct(struct json package)
@@ -781,7 +754,7 @@ static void send_struct(struct json package)
 
 	// data_publish(&client, MQTT_QOS_1_AT_LEAST_ONCE,
 	// out, strlen(out));
-
+	cJSON_free(out);
 	free(out);
 
 	// free all objects under root and root itself
@@ -819,7 +792,7 @@ void checkForSem(void)
 			printk("Fix available, but we're not connected to the cloud");
 		}
 	}
-	
+
 	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
 	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
 	// events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
