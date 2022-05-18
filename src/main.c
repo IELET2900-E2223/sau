@@ -426,7 +426,6 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 
 		printk("Network registration status: %s",
 			   evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME ? "Connected - home network" : "Connected - roaming\n");
-		// k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		printk("PSM parameter update: TAU: %d, Active time: %d",
@@ -517,11 +516,11 @@ static int modem_init(void)
 	return 0;
 }
 
-/* Initiates the work queue AND the assistance module*/
+/* Initiates the work queue for the assistance module*/
 static int sample_init(void)
 {
-	int err = 0;
 
+	int err = 0;
 #if !defined(CONFIG_SAU_ASSISTANCE_NONE) // This only happens if we want to use AGPS
 	struct k_work_queue_config cfg = {
 		.name = "gnss_work_q",
@@ -544,15 +543,7 @@ static int sample_init(void)
 
 static int gnss_init_and_start(void)
 {
-	/*#if defined(CONFIG_SAU_ASSISTANCE_NONE)
-		// Enable GNSS.
-		if (lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_GNSS) != 0) // This activates GNSS without changing LTE.
-		{
-			printk("Failed to activate GNSS functional mode\n");
-			return -1;
-		}
-	endif // CONFIG_SAU_ASSISTANCE_NONE
-	*/
+
 	/* Configure GNSS. */
 	if (nrf_modem_gnss_event_handler_set(gnss_event_handler) != 0)
 	{
@@ -562,6 +553,7 @@ static int gnss_init_and_start(void)
 	printk("Gnss handler set! \n");
 
 	/* Enable all supported NMEA messages. */
+	/* // We're not using the nmea masks, but kept if for future reference
 	uint16_t nmea_mask = NRF_MODEM_GNSS_NMEA_RMC_MASK |
 						 NRF_MODEM_GNSS_NMEA_GGA_MASK |
 						 NRF_MODEM_GNSS_NMEA_GLL_MASK |
@@ -574,6 +566,7 @@ static int gnss_init_and_start(void)
 		return -1;
 	}
 	printk("NMEA masks set \n");
+*/
 
 	/* This use case flag should always be set. */
 	uint8_t use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START;
@@ -585,6 +578,7 @@ static int gnss_init_and_start(void)
 			use_case |= NRF_MODEM_GNSS_USE_CASE_SCHED_DOWNLOAD_DISABLE;
 		}
 	*/
+
 	if (IS_ENABLED(CONFIG_SAU_LOW_ACCURACY)) // Allows low accuracy fixes with only 3 satelites
 	{
 		use_case |= NRF_MODEM_GNSS_USE_CASE_LOW_ACCURACY;
@@ -594,7 +588,10 @@ static int gnss_init_and_start(void)
 	{
 		printk("Failed to set GNSS use case\n");
 	}
-	printk("Use case set \n");
+	else
+	{
+		printk("Use case set \n");
+	}
 
 	uint16_t fix_retry = 180;
 	uint16_t fix_interval = 60 * 5;
@@ -610,7 +607,7 @@ static int gnss_init_and_start(void)
 		printk("Failed to set GNSS fix interval\n");
 		return -1;
 	}
-	printk("Set fix reset 180 and fix interval to 15 min \n");
+	printk("Fix interval and retry set.");
 
 	if (nrf_modem_gnss_start() != 0)
 	{
@@ -648,7 +645,7 @@ static void print_satellite_stats(struct nrf_modem_gnss_pvt_data_frame *pvt_data
 	printk("Tracking: %2d Using: %2d Unhealthy: %d \n", tracked, in_fix, unhealthy);
 }
 
-/* Prints location PVT data*/
+/* Prints location PVT data */
 static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 {
 	printk("Latitude:       %.06f \n", pvt_data->latitude);
@@ -673,9 +670,9 @@ static void print_fix_data(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	printk("TDOP:           %.01f \n", pvt_data->tdop);
 }
 
+/* Function for transmitting message to the cloud*/
 void transmit_to_cloud(char *message)
 {
-
 	struct cloud_msg msg = {
 		.qos = CLOUD_QOS_AT_MOST_ONCE, // Bør evalueres
 		.buf = message,
@@ -688,8 +685,7 @@ void transmit_to_cloud(char *message)
 	}
 }
 
-// work in progress
-
+/* Function for converting the pvt data to our own package data */
 void pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 {
 	package.longitude = pvt_data->longitude;
@@ -698,6 +694,7 @@ void pvt_to_package(struct nrf_modem_gnss_pvt_data_frame *pvt_data)
 	package.accuracy = pvt_data->accuracy;
 }
 
+/*  */
 static void send_struct(struct json package)
 {
 	char *out;
@@ -767,7 +764,7 @@ void checkForSem(void)
 {
 	k_poll(events, 2, K_FOREVER); // Looking at semaphores for gnss
 	if (events[PVT_DATA_SEM].state == K_POLL_STATE_SEM_AVAILABLE &&
-		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0)
+		k_sem_take(events[PVT_DATA_SEM].sem, K_NO_WAIT) == 0) // While searching for fix, this is called every second
 	{
 		// printk("\033[1;1H\n"); // These two lines clears the console between printing
 		// printk("\033[2J\n");
@@ -795,9 +792,6 @@ void checkForSem(void)
 
 	events[PVT_FIX_SEM].state = K_POLL_STATE_NOT_READY;
 	events[PVT_DATA_SEM].state = K_POLL_STATE_NOT_READY;
-	// events[LTE_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
-	// events[CLOUD_CONNECTED_SEM].state = K_POLL_STATE_NOT_READY;
-	// events[NMEA_QUEUE_SEM].state = K_POLL_STATE_NOT_READY;
 }
 
 void main(void)
@@ -816,7 +810,7 @@ void main(void)
 		printk("Cloud backend could not be initialized, error: %d",
 			   err);
 	}
-	work_init();
+//	work_init(); //Why was this double? 
 
 	k_work_schedule(&connect_work, K_NO_WAIT); // This thread connects to the cloud
 	for (;;)
